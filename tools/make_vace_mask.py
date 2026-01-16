@@ -39,6 +39,7 @@ def parse_args():
     parser.add_argument("--start_frame", type=int, default=0, help="Start frame index.")
     parser.add_argument("--fps", type=float, default=None, help="Output FPS. Defaults to input FPS.")
     parser.add_argument("--strict", action="store_true", help="Require GT and raw videos to have the same frame count.")
+    parser.add_argument("--clip_to_min", action="store_true", help="When strict, clip to the shorter video instead of failing.")
     parser.add_argument("--macro_block_size", type=int, default=1, help="FFmpeg macro block size. Use 1 to prevent resizing.")
     return parser.parse_args()
 
@@ -114,10 +115,18 @@ def main():
             gt_reader.close()
             raw_reader.close()
             raise SystemExit(f"Cannot count frames for strict mode: {exc}")
+        frame_count = gt_count
         if gt_count != raw_count:
-            gt_reader.close()
-            raw_reader.close()
-            raise SystemExit(f"Frame count mismatch: gt={gt_count} raw={raw_count}")
+            if args.clip_to_min:
+                frame_count = min(gt_count, raw_count)
+                print(
+                    f"Warning: frame count mismatch (gt={gt_count} raw={raw_count}); using min={frame_count}.",
+                    file=sys.stderr,
+                )
+            else:
+                gt_reader.close()
+                raw_reader.close()
+                raise SystemExit(f"Frame count mismatch: gt={gt_count} raw={raw_count}")
     fps = args.fps if args.fps is not None else gt_meta.get("fps", 15)
     if fps is None:
         fps = raw_meta.get("fps", 15)
@@ -128,7 +137,7 @@ def main():
 
     processed = 0
     if args.strict:
-        total = gt_reader.count_frames()
+        total = frame_count
         end_frame = total if args.num_frames is None else min(total, args.start_frame + args.num_frames)
         for idx in range(args.start_frame, end_frame):
             gt_frame = gt_reader.get_data(idx)

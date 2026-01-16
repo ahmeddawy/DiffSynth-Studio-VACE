@@ -101,6 +101,7 @@ for dir in "$parent_dir"/*/; do
     --raw "$raw" \
     --output "$out" \
     --strict \
+    --clip_to_min \
     --macro_block_size 1 \
     "${extra_args[@]}"
 done

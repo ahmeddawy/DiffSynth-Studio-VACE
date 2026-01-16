@@ -14,6 +14,7 @@ import sys
 import numpy as np
 import imageio
 import imageio.v3 as iio
+from PIL import Image
 
 try:
     import cv2
@@ -40,6 +41,7 @@ def parse_args():
     parser.add_argument("--fps", type=float, default=None, help="Output FPS. Defaults to input FPS.")
     parser.add_argument("--strict", action="store_true", help="Require GT and raw videos to have the same frame count.")
     parser.add_argument("--clip_to_min", action="store_true", help="When strict, clip to the shorter video instead of failing.")
+    parser.add_argument("--resize_to_raw", action="store_true", help="Resize GT frames to raw size when shapes differ.")
     parser.add_argument("--macro_block_size", type=int, default=1, help="FFmpeg macro block size. Use 1 to prevent resizing.")
     return parser.parse_args()
 
@@ -88,6 +90,14 @@ def to_rgb(mask):
     if mask.ndim == 2:
         return np.repeat(mask[:, :, None], 3, axis=2)
     return mask
+
+
+def resize_frame(frame, height, width):
+    if cv2 is not None:
+        return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+    image = Image.fromarray(frame)
+    image = image.resize((width, height), Image.BILINEAR)
+    return np.array(image)
 
 
 def main():
@@ -143,7 +153,11 @@ def main():
             gt_frame = gt_reader.get_data(idx)
             raw_frame = raw_reader.get_data(idx)
             if gt_frame.shape != raw_frame.shape:
-                raise ValueError(f"Frame shape mismatch at index {idx}: {gt_frame.shape} vs {raw_frame.shape}")
+                if args.resize_to_raw:
+                    raw_h, raw_w = raw_frame.shape[:2]
+                    gt_frame = resize_frame(gt_frame, raw_h, raw_w)
+                else:
+                    raise ValueError(f"Frame shape mismatch at index {idx}: {gt_frame.shape} vs {raw_frame.shape}")
             mask = compute_mask(gt_frame, raw_frame, args)
             if output_is_video:
                 writer.append_data(to_rgb(mask))
@@ -160,7 +174,11 @@ def main():
             if args.num_frames is not None and processed >= args.num_frames:
                 break
             if gt_frame.shape != raw_frame.shape:
-                raise ValueError(f"Frame shape mismatch at index {idx}: {gt_frame.shape} vs {raw_frame.shape}")
+                if args.resize_to_raw:
+                    raw_h, raw_w = raw_frame.shape[:2]
+                    gt_frame = resize_frame(gt_frame, raw_h, raw_w)
+                else:
+                    raise ValueError(f"Frame shape mismatch at index {idx}: {gt_frame.shape} vs {raw_frame.shape}")
             mask = compute_mask(gt_frame, raw_frame, args)
             if output_is_video:
                 writer.append_data(to_rgb(mask))

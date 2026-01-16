@@ -6,6 +6,21 @@ from .training_module import DiffusionTrainingModule
 from .logger import ModelLogger
 
 
+def _get_model_attr(model, name):
+    if hasattr(model, name):
+        return getattr(model, name)
+    if hasattr(model, "module") and hasattr(model.module, name):
+        return getattr(model.module, name)
+    return None
+
+
+def _get_last_mask_loss(model):
+    pipe = _get_model_attr(model, "pipe")
+    if pipe is None:
+        return None
+    return getattr(pipe, "last_mask_loss", None)
+
+
 def _pad_frames(frames, target_frames):
     if target_frames is None:
         return frames
@@ -101,6 +116,7 @@ def run_validation(
     was_training = model.training
     model.eval()
     losses = []
+    mask_losses = []
     with torch.no_grad():
         for step, data in enumerate(tqdm(dataloader, desc="Eval")):
             if max_batches is not None and step >= max_batches:
@@ -112,6 +128,11 @@ def run_validation(
             loss = loss.detach().float()
             loss = accelerator.gather(loss)
             losses.append(loss.flatten())
+            mask_loss_value = _get_last_mask_loss(model)
+            if mask_loss_value is not None:
+                mask_loss_value = mask_loss_value.detach().float()
+                mask_loss_value = accelerator.gather(mask_loss_value)
+                mask_losses.append(mask_loss_value.flatten())
     if was_training:
         model.train()
     if not losses:
@@ -119,6 +140,9 @@ def run_validation(
     mean_loss = torch.cat(losses).mean().item()
     if accelerator.is_main_process:
         print(f"Eval loss: {mean_loss:.6f}")
+        if mask_losses:
+            mean_mask_loss = torch.cat(mask_losses).mean().item()
+            print(f"Eval mask loss: {mean_mask_loss:.6f}")
     return mean_loss
 
 
@@ -177,7 +201,9 @@ def launch_training_task(
     best_val_loss = None
     for epoch_id in range(num_epochs):
         epoch_loss_sum = None
+        epoch_mask_loss_sum = None
         epoch_steps = 0
+        epoch_mask_steps = 0
         for data in tqdm(dataloader):
             with accelerator.accumulate(model):
                 optimizer.zero_grad()
@@ -191,6 +217,14 @@ def launch_training_task(
                 else:
                     epoch_loss_sum = epoch_loss_sum + loss_value
                 epoch_steps += 1
+                mask_loss_value = _get_last_mask_loss(model)
+                if mask_loss_value is not None:
+                    mask_loss_value = mask_loss_value.detach().float()
+                    if epoch_mask_loss_sum is None:
+                        epoch_mask_loss_sum = mask_loss_value
+                    else:
+                        epoch_mask_loss_sum = epoch_mask_loss_sum + mask_loss_value
+                    epoch_mask_steps += 1
                 accelerator.backward(loss)
                 optimizer.step()
                 model_logger.on_step_end(accelerator, model, save_steps)
@@ -200,11 +234,21 @@ def launch_training_task(
         steps_tensor = torch.tensor(float(epoch_steps), device=epoch_loss_sum.device)
         loss_stats = torch.stack([epoch_loss_sum, steps_tensor]).unsqueeze(0)
         gathered_stats = accelerator.gather(loss_stats)
+        if epoch_mask_loss_sum is None:
+            epoch_mask_loss_sum = torch.tensor(0.0, device=accelerator.device)
+        mask_steps_tensor = torch.tensor(float(epoch_mask_steps), device=epoch_mask_loss_sum.device)
+        mask_stats = torch.stack([epoch_mask_loss_sum, mask_steps_tensor]).unsqueeze(0)
+        gathered_mask_stats = accelerator.gather(mask_stats)
         if accelerator.is_main_process:
             total_loss = gathered_stats[:, 0].sum().item()
             total_steps = gathered_stats[:, 1].sum().item()
             avg_loss = total_loss / total_steps if total_steps > 0 else float("nan")
             print(f"Train loss (epoch {epoch_id}): {avg_loss:.6f}")
+            total_mask_steps = gathered_mask_stats[:, 1].sum().item()
+            if total_mask_steps > 0:
+                total_mask_loss = gathered_mask_stats[:, 0].sum().item()
+                avg_mask_loss = total_mask_loss / total_mask_steps
+                print(f"Train mask loss (epoch {epoch_id}): {avg_mask_loss:.6f}")
         if save_steps is None:
             model_logger.on_epoch_end(accelerator, model, epoch_id)
         if val_dataset is not None and eval_every_n_epochs > 0 and (epoch_id + 1) % eval_every_n_epochs == 0:

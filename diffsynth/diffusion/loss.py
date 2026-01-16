@@ -18,6 +18,49 @@ def FlowMatchSFTLoss(pipe: BasePipeline, **inputs):
     
     loss = torch.nn.functional.mse_loss(noise_pred.float(), training_target.float())
     loss = loss * pipe.scheduler.training_weight(timestep)
+    pipe.last_mask_loss = None
+    loss_mask_video = inputs.get("loss_mask_video")
+    if loss_mask_video is not None:
+        if isinstance(loss_mask_video, torch.Tensor):
+            mask = loss_mask_video
+            if mask.dim() == 3:
+                mask = mask.unsqueeze(0).unsqueeze(2)
+            elif mask.dim() == 4:
+                mask = mask.unsqueeze(0)
+        else:
+            mask = pipe.preprocess_video(loss_mask_video, min_value=0, max_value=1)
+        if mask.dim() != 5:
+            raise ValueError(f"loss_mask_video must be 5D after processing, got shape {mask.shape}.")
+        mask = mask.to(dtype=inputs["input_latents"].dtype, device=inputs["input_latents"].device)
+        mask = mask[:, :1]
+        target_t = (mask.shape[2] + 3) // 4
+        mask = torch.nn.functional.interpolate(
+            mask,
+            size=(target_t, inputs["input_latents"].shape[3], inputs["input_latents"].shape[4]),
+            mode="nearest-exact",
+        )
+        pad = inputs["input_latents"].shape[2] - mask.shape[2]
+        if pad > 0:
+            pad_tensor = torch.zeros((mask.shape[0], 1, pad, mask.shape[3], mask.shape[4]), dtype=mask.dtype, device=mask.device)
+            mask = torch.cat([pad_tensor, mask], dim=2)
+        elif pad < 0:
+            mask = mask[:, :, :inputs["input_latents"].shape[2]]
+            pad = 0
+        if inputs.get("loss_mask_skip_first_frame", False):
+            idx = pad
+            if idx < mask.shape[2]:
+                mask[:, :, idx] = 0
+        x0_pred = noise - noise_pred
+        diff2 = (x0_pred - inputs["input_latents"]).float().pow(2).mean(dim=1, keepdim=True)
+        mask_sum = mask.sum()
+        mask_loss = (diff2 * mask).sum() / (mask_sum + 1e-8)
+        mask_loss = mask_loss * pipe.scheduler.training_weight(timestep)
+        pipe.last_mask_loss = mask_loss.detach()
+        mask_weight = inputs.get("loss_mask_weight", 0.0)
+        if mask_weight is not None:
+            mask_weight = float(mask_weight)
+            if mask_weight != 0:
+                loss = loss + mask_loss * mask_weight
     return loss
 
 

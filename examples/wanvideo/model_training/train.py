@@ -23,6 +23,8 @@ class WanTrainingModule(DiffusionTrainingModule):
         task="sft",
         max_timestep_boundary=1.0,
         min_timestep_boundary=0.0,
+        loss_mask_weight=0.0,
+        loss_mask_skip_first_frame=False,
     ):
         super().__init__()
         # Warning
@@ -51,6 +53,8 @@ class WanTrainingModule(DiffusionTrainingModule):
         self.extra_inputs = extra_inputs.split(",") if extra_inputs is not None else []
         self.fp8_models = fp8_models
         self.task = task
+        self.loss_mask_weight = loss_mask_weight
+        self.loss_mask_skip_first_frame = loss_mask_skip_first_frame
         self.task_to_loss = {
             "sft:data_process": lambda pipe, *args: args,
             "direct_distill:data_process": lambda pipe, *args: args,
@@ -141,6 +145,8 @@ class WanTrainingModule(DiffusionTrainingModule):
             "vace_scale": 1,
             "max_timestep_boundary": self.max_timestep_boundary,
             "min_timestep_boundary": self.min_timestep_boundary,
+            "loss_mask_weight": self.loss_mask_weight,
+            "loss_mask_skip_first_frame": self.loss_mask_skip_first_frame,
         }
         inputs_shared = self.parse_extra_inputs(data, self.extra_inputs, inputs_shared)
         return inputs_shared, inputs_posi, inputs_nega
@@ -240,6 +246,8 @@ if __name__ == "__main__":
         device="cpu" if args.initialize_model_on_cpu else accelerator.device,
         max_timestep_boundary=args.max_timestep_boundary,
         min_timestep_boundary=args.min_timestep_boundary,
+        loss_mask_weight=args.loss_mask_weight,
+        loss_mask_skip_first_frame=args.loss_mask_skip_first_frame,
     )
     model_logger = ModelLogger(
         args.output_path,

@@ -30,7 +30,20 @@ def _compute_mask_weight(args, step, total_steps):
     end = getattr(args, "loss_mask_weight_end", None)
     if end is None or total_steps <= 1:
         return float(start)
-    progress = min(max(step / (total_steps - 1), 0.0), 1.0)
+    hold_ratio = float(getattr(args, "loss_mask_hold_ratio", 0.0) or 0.0)
+    hold_steps = 0
+    if hold_ratio > 0:
+        hold_steps = int(round(total_steps * hold_ratio))
+        hold_steps = min(hold_steps, max(total_steps - 1, 0))
+    if step < hold_steps:
+        return float(start)
+    decay_steps = max(1, total_steps - hold_steps - 1)
+    progress = min(max((step - hold_steps) / decay_steps, 0.0), 1.0)
+    decay = getattr(args, "loss_mask_decay", "linear")
+    if decay == "cosine":
+        import math
+        weight = end + (start - end) * 0.5 * (1.0 + math.cos(math.pi * progress))
+        return float(weight)
     return float(start + (end - start) * progress)
 
 

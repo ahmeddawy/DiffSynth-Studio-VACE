@@ -25,4 +25,6 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --eval_max_batches 50 \
   --loss_mask_weight 3.0 \
   --loss_mask_weight_end 0.3 \
+  --loss_mask_hold_ratio 0.2 \
+  --loss_mask_decay cosine \
   --loss_mask_skip_first_frame

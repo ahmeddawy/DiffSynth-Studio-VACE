@@ -39,7 +39,9 @@ def add_training_config(parser: argparse.ArgumentParser):
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay.")
     parser.add_argument("--task", type=str, default="sft", required=False, help="Task type.")
     parser.add_argument("--loss_mask_weight", type=float, default=0.0, help="Weight for masked latent loss using loss_mask_video.")
-    parser.add_argument("--loss_mask_weight_end", type=float, default=None, help="Final masked loss weight for linear decay; unset keeps it constant.")
+    parser.add_argument("--loss_mask_weight_end", type=float, default=None, help="Final masked loss weight for decay; unset keeps it constant.")
+    parser.add_argument("--loss_mask_hold_ratio", type=float, default=0.0, help="Fraction of steps to hold the start mask weight before decay.")
+    parser.add_argument("--loss_mask_decay", type=str, default="linear", choices=("linear", "cosine"), help="Decay type for mask loss weight.")
     parser.add_argument("--loss_mask_skip_first_frame", default=False, action="store_true", help="Skip mask loss on the first video frame.")
     return parser
 

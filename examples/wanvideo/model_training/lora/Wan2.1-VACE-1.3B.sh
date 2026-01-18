@@ -6,7 +6,7 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --width 832 \
   --dataset_repeat 2 \
   --model_id_with_origin_paths "Wan-AI/Wan2.1-VACE-1.3B:diffusion_pytorch_model*.safetensors,Wan-AI/Wan2.1-VACE-1.3B:models_t5_umt5-xxl-enc-bf16.pth,Wan-AI/Wan2.1-VACE-1.3B:Wan2.1_VAE.pth" \
-  --learning_rate 1e-4 \
+  --learning_rate 3e-4 \
   --batch_size 5 \
   --gradient_accumulation_steps 4 \
   --num_epochs 25 \
@@ -14,7 +14,7 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --output_path "./models/train/Wan2.1-VACE-1.3B_lora_latent_mask_loss" \
   --lora_base_model "vace" \
   --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
-  --lora_rank 32 \
+  --lora_rank 64 \
   --extra_inputs "video,vace_video,vace_reference_image,vace_video_mask,loss_mask_video" \
   --use_gradient_checkpointing_offload \
   --val_dataset_base_path /mnt/bucket/dawy/video_generation/two_stage_dataset \
@@ -23,5 +23,6 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --val_batch_size 2 \
   --eval_every_n_epochs 1 \
   --eval_max_batches 50 \
-  --loss_mask_weight 1.0 \
+  --loss_mask_weight 3.0 \
+  --loss_mask_weight_end 0.3 \
   --loss_mask_skip_first_frame

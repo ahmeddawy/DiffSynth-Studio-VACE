@@ -21,6 +21,30 @@ def _get_last_mask_loss(model):
     return getattr(pipe, "last_mask_loss", None)
 
 
+def _compute_mask_weight(args, step, total_steps):
+    if args is None:
+        return None
+    start = getattr(args, "loss_mask_weight", None)
+    if start is None:
+        return None
+    end = getattr(args, "loss_mask_weight_end", None)
+    if end is None or total_steps <= 1:
+        return float(start)
+    progress = min(max(step / (total_steps - 1), 0.0), 1.0)
+    return float(start + (end - start) * progress)
+
+
+def _apply_mask_weight(model, data, weight):
+    if weight is None:
+        return
+    if hasattr(model, "loss_mask_weight"):
+        model.loss_mask_weight = weight
+    elif hasattr(model, "module") and hasattr(model.module, "loss_mask_weight"):
+        model.module.loss_mask_weight = weight
+    if isinstance(data, dict):
+        data["loss_mask_weight"] = weight
+
+
 def _pad_frames(frames, target_frames):
     if target_frames is None:
         return frames
@@ -122,6 +146,8 @@ def run_validation(
             if max_batches is not None and step >= max_batches:
                 break
             if dataset.load_from_cache:
+                _apply_mask_weight(model, data, _get_model_attr(model, "loss_mask_weight"))
+            if dataset.load_from_cache:
                 loss = model({}, inputs=data)
             else:
                 loss = model(data)
@@ -199,6 +225,8 @@ def launch_training_task(
     model, optimizer, dataloader, scheduler = accelerator.prepare(model, optimizer, dataloader, scheduler)
     
     best_val_loss = None
+    global_step = 0
+    total_steps = num_epochs * len(dataloader) if num_epochs is not None else len(dataloader)
     for epoch_id in range(num_epochs):
         epoch_loss_sum = None
         epoch_mask_loss_sum = None
@@ -206,6 +234,8 @@ def launch_training_task(
         epoch_mask_steps = 0
         for data in tqdm(dataloader):
             with accelerator.accumulate(model):
+                mask_weight = _compute_mask_weight(args, global_step, total_steps)
+                _apply_mask_weight(model, data if dataset.load_from_cache else None, mask_weight)
                 optimizer.zero_grad()
                 if dataset.load_from_cache:
                     loss = model({}, inputs=data)
@@ -229,6 +259,7 @@ def launch_training_task(
                 optimizer.step()
                 model_logger.on_step_end(accelerator, model, save_steps)
                 scheduler.step()
+                global_step += 1
         if epoch_loss_sum is None:
             epoch_loss_sum = torch.tensor(0.0, device=accelerator.device)
         steps_tensor = torch.tensor(float(epoch_steps), device=epoch_loss_sum.device)
@@ -249,9 +280,13 @@ def launch_training_task(
                 total_mask_loss = gathered_mask_stats[:, 0].sum().item()
                 avg_mask_loss = total_mask_loss / total_mask_steps
                 print(f"Train mask loss (epoch {epoch_id}): {avg_mask_loss:.6f}")
+            current_mask_weight = _compute_mask_weight(args, max(global_step - 1, 0), total_steps)
+            if current_mask_weight is not None and getattr(args, "loss_mask_weight_end", None) is not None:
+                print(f"Mask loss weight (epoch {epoch_id}): {current_mask_weight:.4f}")
         if save_steps is None:
             model_logger.on_epoch_end(accelerator, model, epoch_id)
         if val_dataset is not None and eval_every_n_epochs > 0 and (epoch_id + 1) % eval_every_n_epochs == 0:
+            _apply_mask_weight(model, None, _compute_mask_weight(args, max(global_step - 1, 0), total_steps))
             val_loss = run_validation(
                 accelerator,
                 val_dataset,

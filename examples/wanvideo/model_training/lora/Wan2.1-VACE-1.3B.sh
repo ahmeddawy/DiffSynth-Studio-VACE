@@ -27,4 +27,12 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --loss_mask_weight_end 0.3 \
   --loss_mask_hold_ratio 0.2 \
   --loss_mask_decay cosine \
-  --loss_mask_skip_first_frame
+  --loss_mask_skip_first_frame \
+  --aug_enable \
+  --aug_hflip_prob 0.5 \
+  --aug_color_jitter_prob 0.3 \
+  --aug_color_jitter_strength 0.2 \
+  --aug_fog_prob 0.1 \
+  --aug_rain_prob 0.1 \
+  --aug_snow_prob 0.05 \
+  --aug_sunflare_prob 0.05

@@ -10,6 +10,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
         data_file_keys=tuple(),
         main_data_operator=lambda x: x,
         special_operator_map=None,
+        sample_operator=None,
     ):
         self.base_path = base_path
         self.metadata_path = metadata_path
@@ -18,6 +19,7 @@ class UnifiedDataset(torch.utils.data.Dataset):
         self.main_data_operator = main_data_operator
         self.cached_data_operator = LoadTorchPickle()
         self.special_operator_map = {} if special_operator_map is None else special_operator_map
+        self.sample_operator = sample_operator
         self.data = []
         self.cached_data = []
         self.load_from_cache = metadata_path is None
@@ -94,6 +96,8 @@ class UnifiedDataset(torch.utils.data.Dataset):
                         data[key] = self.special_operator_map[key](data[key])
                     elif key in self.data_file_keys:
                         data[key] = self.main_data_operator(data[key])
+            if self.sample_operator is not None:
+                data = self.sample_operator(data)
         return data
 
     def __len__(self):

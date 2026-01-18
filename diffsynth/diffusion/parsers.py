@@ -77,6 +77,17 @@ def add_eval_config(parser: argparse.ArgumentParser):
     parser.add_argument("--eval_max_batches", type=int, default=None, help="Maximum validation batches per eval pass.")
     return parser
 
+def add_augmentation_config(parser: argparse.ArgumentParser):
+    parser.add_argument("--aug_enable", default=False, action="store_true", help="Enable video-level augmentation.")
+    parser.add_argument("--aug_hflip_prob", type=float, default=0.0, help="Horizontal flip probability for video-level augmentation.")
+    parser.add_argument("--aug_color_jitter_prob", type=float, default=0.0, help="Color jitter probability for video-level augmentation.")
+    parser.add_argument("--aug_color_jitter_strength", type=float, default=0.2, help="Color jitter strength.")
+    parser.add_argument("--aug_fog_prob", type=float, default=0.0, help="Random fog probability for video-level augmentation.")
+    parser.add_argument("--aug_rain_prob", type=float, default=0.0, help="Random rain probability for video-level augmentation.")
+    parser.add_argument("--aug_snow_prob", type=float, default=0.0, help="Random snow probability for video-level augmentation.")
+    parser.add_argument("--aug_sunflare_prob", type=float, default=0.0, help="Random sunflare probability for video-level augmentation.")
+    return parser
+
 def add_general_config(parser: argparse.ArgumentParser):
     parser = add_dataset_base_config(parser)
     parser = add_model_config(parser)
@@ -85,4 +96,5 @@ def add_general_config(parser: argparse.ArgumentParser):
     parser = add_lora_config(parser)
     parser = add_gradient_config(parser)
     parser = add_eval_config(parser)
+    parser = add_augmentation_config(parser)
     return parser

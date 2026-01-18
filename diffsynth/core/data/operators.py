@@ -1,4 +1,5 @@
 import torch, torchvision, imageio, os
+import numpy as np
 import imageio.v3 as iio
 from PIL import Image
 
@@ -218,3 +219,158 @@ class LoadAudio(DataProcessingOperator):
         import librosa
         input_audio, sample_rate = librosa.load(data, sr=self.sr)
         return input_audio
+
+
+class VideoAugment:
+    def __init__(
+        self,
+        geo_keys=None,
+        mask_keys=None,
+        color_keys=None,
+        hflip_prob=0.0,
+        color_jitter_prob=0.0,
+        color_jitter_strength=0.2,
+        fog_prob=0.0,
+        rain_prob=0.0,
+        snow_prob=0.0,
+        sunflare_prob=0.0,
+    ):
+        try:
+            import albumentations as A
+        except Exception as exc:
+            raise ImportError("Albumentations is required for VideoAugment. Please install it to use augmentation.") from exc
+
+        self.A = A
+        self.geo_keys = tuple(geo_keys or [])
+        self.mask_keys = set(mask_keys or [])
+        self.color_keys = tuple(color_keys or [])
+        self.hflip_prob = float(hflip_prob)
+        self.color_jitter_prob = float(color_jitter_prob)
+        self.color_jitter_strength = float(color_jitter_strength)
+        self.fog_prob = float(fog_prob)
+        self.rain_prob = float(rain_prob)
+        self.snow_prob = float(snow_prob)
+        self.sunflare_prob = float(sunflare_prob)
+        self.geo_aug = self._build_geo_aug()
+        self.color_aug = self._build_color_aug()
+        self.enabled = self.geo_aug is not None or self.color_aug is not None
+
+    def _build_geo_aug(self):
+        transforms = []
+        if self.hflip_prob > 0:
+            transforms.append(self.A.HorizontalFlip(p=self.hflip_prob))
+        if not transforms:
+            return None
+        return self.A.ReplayCompose(transforms)
+
+    def _build_color_aug(self):
+        transforms = []
+        if self.color_jitter_prob > 0:
+            strength = self.color_jitter_strength
+            transforms.append(
+                self.A.ColorJitter(
+                    brightness=strength,
+                    contrast=strength,
+                    saturation=strength,
+                    hue=min(0.1, strength),
+                    p=self.color_jitter_prob,
+                )
+            )
+        if self.fog_prob > 0:
+            if not hasattr(self.A, "RandomFog"):
+                raise ImportError("Albumentations RandomFog is unavailable; upgrade albumentations to use fog augmentation.")
+            transforms.append(self.A.RandomFog(p=self.fog_prob))
+        if self.rain_prob > 0:
+            if not hasattr(self.A, "RandomRain"):
+                raise ImportError("Albumentations RandomRain is unavailable; upgrade albumentations to use rain augmentation.")
+            transforms.append(self.A.RandomRain(p=self.rain_prob))
+        if self.snow_prob > 0:
+            if not hasattr(self.A, "RandomSnow"):
+                raise ImportError("Albumentations RandomSnow is unavailable; upgrade albumentations to use snow augmentation.")
+            transforms.append(self.A.RandomSnow(p=self.snow_prob))
+        if self.sunflare_prob > 0:
+            if not hasattr(self.A, "RandomSunFlare"):
+                raise ImportError("Albumentations RandomSunFlare is unavailable; upgrade albumentations to use sunflare augmentation.")
+            transforms.append(self.A.RandomSunFlare(p=self.sunflare_prob))
+        if not transforms:
+            return None
+        return self.A.ReplayCompose(transforms)
+
+    def _ensure_list(self, value):
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    def _pick_reference_frame(self, sample, keys):
+        for key in keys:
+            frames = self._ensure_list(sample.get(key))
+            if not frames:
+                continue
+            return frames[0]
+        return None
+
+    def _apply_geo_to_frames(self, frames, replay, is_mask=False):
+        out = []
+        for frame in frames:
+            arr = np.array(frame)
+            if is_mask:
+                if arr.ndim == 3:
+                    mask = arr[:, :, 0]
+                    image = arr
+                else:
+                    mask = arr
+                    image = np.repeat(arr[:, :, None], 3, axis=2)
+                result = self.A.ReplayCompose.replay(replay, image=image, mask=mask)
+                mask_out = result["mask"]
+                if mask_out.ndim == 2:
+                    mask_out = np.repeat(mask_out[:, :, None], 3, axis=2)
+                mask_out = mask_out.astype(np.uint8)
+                out.append(Image.fromarray(mask_out))
+            else:
+                if arr.ndim == 2:
+                    arr = np.repeat(arr[:, :, None], 3, axis=2)
+                result = self.A.ReplayCompose.replay(replay, image=arr)
+                image_out = result["image"].astype(np.uint8)
+                out.append(Image.fromarray(image_out))
+        return out
+
+    def _apply_color_to_frames(self, frames, replay):
+        out = []
+        for frame in frames:
+            arr = np.array(frame)
+            if arr.ndim == 2:
+                arr = np.repeat(arr[:, :, None], 3, axis=2)
+            result = self.A.ReplayCompose.replay(replay, image=arr)
+            image_out = result["image"].astype(np.uint8)
+            out.append(Image.fromarray(image_out))
+        return out
+
+    def __call__(self, sample: dict):
+        if not self.enabled:
+            return sample
+        data = sample.copy()
+        if self.geo_aug is not None:
+            geo_keys = list(self.geo_keys)
+            for key in self.mask_keys:
+                if key not in geo_keys:
+                    geo_keys.append(key)
+            ref = self._pick_reference_frame(data, geo_keys)
+            if ref is not None:
+                geo_replay = self.geo_aug(image=np.array(ref))["replay"]
+                for key in geo_keys:
+                    frames = self._ensure_list(data.get(key))
+                    if not frames:
+                        continue
+                    data[key] = self._apply_geo_to_frames(frames, geo_replay, is_mask=key in self.mask_keys)
+        if self.color_aug is not None:
+            ref = self._pick_reference_frame(data, self.color_keys)
+            if ref is not None:
+                color_replay = self.color_aug(image=np.array(ref))["replay"]
+                for key in self.color_keys:
+                    frames = self._ensure_list(data.get(key))
+                    if not frames:
+                        continue
+                    data[key] = self._apply_color_to_frames(frames, color_replay)
+        return data

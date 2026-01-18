@@ -1,6 +1,6 @@
 import torch, os, argparse, accelerate, warnings
 from diffsynth.core import UnifiedDataset
-from diffsynth.core.data.operators import LoadVideo, LoadAudio, ImageCropAndResize, ToAbsolutePath
+from diffsynth.core.data.operators import LoadVideo, LoadAudio, ImageCropAndResize, ToAbsolutePath, VideoAugment
 from diffsynth.pipelines.wan_video import WanVideoPipeline, ModelConfig
 from diffsynth.diffusion import *
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -180,6 +180,30 @@ if __name__ == "__main__":
         kwargs_handlers=[accelerate.DistributedDataParallelKwargs(find_unused_parameters=args.find_unused_parameters)],
     )
     val_dataset = None
+    augmentor = None
+    if args.aug_enable or any(
+        prob > 0
+        for prob in (
+            args.aug_hflip_prob,
+            args.aug_color_jitter_prob,
+            args.aug_fog_prob,
+            args.aug_rain_prob,
+            args.aug_snow_prob,
+            args.aug_sunflare_prob,
+        )
+    ):
+        augmentor = VideoAugment(
+            geo_keys=("video", "vace_video", "vace_reference_image"),
+            mask_keys=("vace_video_mask", "loss_mask_video"),
+            color_keys=("video", "vace_video"),
+            hflip_prob=args.aug_hflip_prob,
+            color_jitter_prob=args.aug_color_jitter_prob,
+            color_jitter_strength=args.aug_color_jitter_strength,
+            fog_prob=args.aug_fog_prob,
+            rain_prob=args.aug_rain_prob,
+            snow_prob=args.aug_snow_prob,
+            sunflare_prob=args.aug_sunflare_prob,
+        )
     if args.val_dataset_metadata_path is not None:
         val_base_path = args.val_dataset_base_path or args.dataset_base_path
         val_data_file_keys = (args.val_data_file_keys or args.data_file_keys).split(",")
@@ -209,6 +233,7 @@ if __name__ == "__main__":
         metadata_path=args.dataset_metadata_path,
         repeat=args.dataset_repeat,
         data_file_keys=args.data_file_keys.split(","),
+        sample_operator=augmentor,
         main_data_operator=UnifiedDataset.default_video_operator(
             base_path=args.dataset_base_path,
             max_pixels=args.max_pixels,

@@ -47,6 +47,42 @@ def _compute_mask_weight(args, step, total_steps):
     return float(start + (end - start) * progress)
 
 
+def _compute_base_weight(args, step, total_steps):
+    if args is None:
+        return None
+    start = getattr(args, "base_loss_weight_start", None)
+    if start is None:
+        return None
+    peak = getattr(args, "base_loss_weight_peak", None)
+    end = getattr(args, "base_loss_weight_end", None)
+    if peak is None:
+        peak = start
+    if end is None:
+        end = peak
+    if total_steps <= 1:
+        return float(peak)
+    warmup_ratio = float(getattr(args, "base_loss_warmup_ratio", 0.0) or 0.0)
+    hold_ratio = float(getattr(args, "base_loss_hold_ratio", 0.0) or 0.0)
+    warmup_steps = int(round(total_steps * max(0.0, warmup_ratio)))
+    hold_steps = int(round(total_steps * max(0.0, hold_ratio)))
+    if warmup_steps + hold_steps >= total_steps:
+        warmup_steps = min(warmup_steps, total_steps - 1)
+        hold_steps = max(0, total_steps - 1 - warmup_steps)
+    if step < warmup_steps:
+        progress = min(max(step / max(1, warmup_steps - 1), 0.0), 1.0)
+        return float(start + (peak - start) * progress)
+    if step < warmup_steps + hold_steps:
+        return float(peak)
+    decay_steps = max(1, total_steps - warmup_steps - hold_steps - 1)
+    progress = min(max((step - warmup_steps - hold_steps) / decay_steps, 0.0), 1.0)
+    decay = getattr(args, "base_loss_decay", "linear")
+    if decay == "cosine":
+        import math
+        weight = end + (peak - end) * 0.5 * (1.0 + math.cos(math.pi * progress))
+        return float(weight)
+    return float(peak + (end - peak) * progress)
+
+
 def _apply_mask_weight(model, data, weight):
     if weight is None:
         return
@@ -56,6 +92,17 @@ def _apply_mask_weight(model, data, weight):
         model.module.loss_mask_weight = weight
     if isinstance(data, dict):
         data["loss_mask_weight"] = weight
+
+
+def _apply_base_weight(model, data, weight):
+    if weight is None:
+        return
+    if hasattr(model, "base_loss_weight"):
+        model.base_loss_weight = weight
+    elif hasattr(model, "module") and hasattr(model.module, "base_loss_weight"):
+        model.module.base_loss_weight = weight
+    if isinstance(data, dict):
+        data["base_loss_weight"] = weight
 
 
 def _pad_frames(frames, target_frames):
@@ -160,6 +207,7 @@ def run_validation(
                 break
             if dataset.load_from_cache:
                 _apply_mask_weight(model, data, _get_model_attr(model, "loss_mask_weight"))
+                _apply_base_weight(model, data, _get_model_attr(model, "base_loss_weight"))
             if dataset.load_from_cache:
                 loss = model({}, inputs=data)
             else:
@@ -249,6 +297,8 @@ def launch_training_task(
             with accelerator.accumulate(model):
                 mask_weight = _compute_mask_weight(args, global_step, total_steps)
                 _apply_mask_weight(model, data if dataset.load_from_cache else None, mask_weight)
+                base_weight = _compute_base_weight(args, global_step, total_steps)
+                _apply_base_weight(model, data if dataset.load_from_cache else None, base_weight)
                 optimizer.zero_grad()
                 if dataset.load_from_cache:
                     loss = model({}, inputs=data)
@@ -296,10 +346,19 @@ def launch_training_task(
             current_mask_weight = _compute_mask_weight(args, max(global_step - 1, 0), total_steps)
             if current_mask_weight is not None and getattr(args, "loss_mask_weight_end", None) is not None:
                 print(f"Mask loss weight (epoch {epoch_id}): {current_mask_weight:.4f}")
+            current_base_weight = _compute_base_weight(args, max(global_step - 1, 0), total_steps)
+            if current_base_weight is not None and (
+                getattr(args, "base_loss_weight_peak", None) is not None
+                or getattr(args, "base_loss_weight_end", None) is not None
+                or getattr(args, "base_loss_warmup_ratio", 0.0) > 0
+                or getattr(args, "base_loss_hold_ratio", 0.0) > 0
+            ):
+                print(f"Base loss weight (epoch {epoch_id}): {current_base_weight:.4f}")
         if save_steps is None:
             model_logger.on_epoch_end(accelerator, model, epoch_id)
         if val_dataset is not None and eval_every_n_epochs > 0 and (epoch_id + 1) % eval_every_n_epochs == 0:
             _apply_mask_weight(model, None, _compute_mask_weight(args, max(global_step - 1, 0), total_steps))
+            _apply_base_weight(model, None, _compute_base_weight(args, max(global_step - 1, 0), total_steps))
             val_loss = run_validation(
                 accelerator,
                 val_dataset,

@@ -25,6 +25,7 @@ class WanTrainingModule(DiffusionTrainingModule):
         min_timestep_boundary=0.0,
         loss_mask_weight=0.0,
         loss_mask_skip_first_frame=False,
+        base_loss_weight=1.0,
     ):
         super().__init__()
         # Warning
@@ -55,6 +56,7 @@ class WanTrainingModule(DiffusionTrainingModule):
         self.task = task
         self.loss_mask_weight = loss_mask_weight
         self.loss_mask_skip_first_frame = loss_mask_skip_first_frame
+        self.base_loss_weight = base_loss_weight
         self.task_to_loss = {
             "sft:data_process": lambda pipe, *args: args,
             "direct_distill:data_process": lambda pipe, *args: args,
@@ -145,6 +147,7 @@ class WanTrainingModule(DiffusionTrainingModule):
             "vace_scale": 1,
             "max_timestep_boundary": self.max_timestep_boundary,
             "min_timestep_boundary": self.min_timestep_boundary,
+            "base_loss_weight": self.base_loss_weight,
             "loss_mask_weight": self.loss_mask_weight,
             "loss_mask_skip_first_frame": self.loss_mask_skip_first_frame,
         }
@@ -273,6 +276,7 @@ if __name__ == "__main__":
         min_timestep_boundary=args.min_timestep_boundary,
         loss_mask_weight=args.loss_mask_weight,
         loss_mask_skip_first_frame=args.loss_mask_skip_first_frame,
+        base_loss_weight=args.base_loss_weight_start,
     )
     model_logger = ModelLogger(
         args.output_path,

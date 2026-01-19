@@ -27,4 +27,10 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --loss_mask_weight_end 0.3 \
   --loss_mask_hold_ratio 0.2 \
   --loss_mask_decay cosine \
-  --loss_mask_skip_first_frame
+  --loss_mask_skip_first_frame \
+  --base_loss_weight_start 0.7 \
+  --base_loss_weight_peak 2.0 \
+  --base_loss_weight_end 0.3 \
+  --base_loss_warmup_ratio 0.2 \
+  --base_loss_hold_ratio 0.2 \
+  --base_loss_decay cosine

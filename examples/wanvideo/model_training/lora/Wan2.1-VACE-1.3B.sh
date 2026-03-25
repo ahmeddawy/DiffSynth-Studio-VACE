@@ -1,4 +1,5 @@
-accelerate launch examples/wanvideo/model_training/train.py \
+accelerate launch --num_processes 8 --multi_gpu \
+  examples/wanvideo/model_training/train.py \
   --dataset_base_path /mnt/bucket/dawy/video_generation/transition_generation_dataset \
   --dataset_metadata_path /mnt/bucket/dawy/video_generation/transition_generation_dataset/metadata_train.csv \
   --data_file_keys "video,vace_video,vace_reference_image,vace_video_mask" \
@@ -7,8 +8,8 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --dataset_repeat 1 \
   --model_id_with_origin_paths "Wan-AI/Wan2.1-VACE-1.3B:diffusion_pytorch_model*.safetensors,Wan-AI/Wan2.1-VACE-1.3B:models_t5_umt5-xxl-enc-bf16.pth,Wan-AI/Wan2.1-VACE-1.3B:Wan2.1_VAE.pth" \
   --learning_rate 1e-4 \
-  --batch_size 5 \
-  --gradient_accumulation_steps 4 \
+  --batch_size 1 \
+  --gradient_accumulation_steps 1 \
   --num_epochs 25 \
   --remove_prefix_in_ckpt "pipe.vace." \
   --output_path "./models/train/Wan2.1-VACE-1.3B_lora_transition" \
@@ -16,11 +17,12 @@ accelerate launch examples/wanvideo/model_training/train.py \
   --lora_target_modules "q,k,v,o,ffn.0,ffn.2" \
   --lora_rank 32 \
   --extra_inputs "vace_video,vace_reference_image,vace_video_mask" \
+  --find_unused_parameters \
   --use_gradient_checkpointing_offload \
   --val_dataset_base_path /mnt/bucket/dawy/video_generation/transition_generation_dataset \
   --val_dataset_metadata_path /mnt/bucket/dawy/video_generation/transition_generation_dataset/metadata_eval.csv \
   --val_data_file_keys "video,vace_video,vace_reference_image,vace_video_mask" \
-  --val_batch_size 2 \
+  --val_batch_size 1 \
   --eval_every_n_epochs 1 \
   --eval_max_batches 10
 

@@ -78,7 +78,7 @@ for i, row in enumerate(rows):
     video = pipe(
         prompt="",
         vace_video=vace_video,
-        vace_video_mask=mask_image,
+        vace_video_mask=[mask_image] * args.num_frames,
         vace_reference_image=reference_image,
         height=args.height,
         width=args.width,

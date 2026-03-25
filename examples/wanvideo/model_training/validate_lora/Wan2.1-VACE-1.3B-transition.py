@@ -1,7 +1,6 @@
 import argparse
 import csv
 import os
-import numpy as np
 import torch
 from PIL import Image
 from diffsynth.utils.data import save_video
@@ -18,12 +17,12 @@ def load_first_frame(path):
     return frame
 
 
-def build_vace_video(reference_image, mask_image, num_frames=81):
-    """vace_video = reference_image * (1 - mask): ad pixels kept, background black."""
-    ref = np.array(reference_image).astype(np.float32)
-    mask = np.array(mask_image.convert('RGB')).astype(np.float32) / 255.0
-    vace_frame = Image.fromarray((ref * (1.0 - mask)).astype(np.uint8))
-    return [vace_frame] * num_frames
+def build_vace_video(reference_image, num_frames=81):
+    """vace_video = full reference frame repeated.
+    The mask separately defines what to freeze (ad) vs generate (background).
+    Providing full background pixels gives the model content to evolve into motion.
+    """
+    return [reference_image] * num_frames
 
 
 parser = argparse.ArgumentParser()
@@ -73,7 +72,7 @@ for i, row in enumerate(rows):
 
     reference_image = load_first_frame(ref_path).resize((args.width, args.height))
     mask_image      = load_first_frame(mask_path).resize((args.width, args.height))
-    vace_video      = build_vace_video(reference_image, mask_image, num_frames=args.num_frames)
+    vace_video      = build_vace_video(reference_image, num_frames=args.num_frames)
 
     video = pipe(
         prompt="",
